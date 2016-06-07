@@ -13,7 +13,7 @@ backTest = function(signal, ts){
 	{
 		stop('输入数组长度不同')
 	}
-
+	choose = c("buy", "sell")
 	profit = 0
 	record = vector()
 	action = vector()
@@ -31,26 +31,21 @@ backTest = function(signal, ts){
 		}
 
 		# 交易后
-		if(flag == 1)
-		{	
-			profit = index[i] - index[i-1]
-			myNAV[i] = myNAV[i-1] + profit
-		}
-
-		if(flag == -1)
+		else
 		{
-			profit = index[i-1] - index[i]
-			myNAV[i] = myNAV[i-1] + profit
+			profit = index[i] - index[i-1]
+			myNAV[i] = myNAV[i-1] + profit*flag
 		}
 		
 
 		# look for flag changes
 
-		if(signal[i] == -1)
+		if(signal[i] != 0)
 		{
 			# 在收盘时按收盘价卖空
-			action[j] = 'start sell'
+			action[j] = ifelse(signal[i] == -1, choose[2],choose[1])
 			record[j] = as.character(date[i])
+			
 
 			# 第一笔交易应该为单边
 			if(j == 1)
@@ -64,39 +59,15 @@ backTest = function(signal, ts){
 			}
 
 			j = j + 1
-			flag = -1
-		}
-		
-		else
-		{
-			if(signal[i] == 1)
-			{
-				# 在收盘时按收盘价买多
-				action[j] = 'start buy'
-				record[j] = as.character(date[i])
-
-				# 第一笔交易应该为单边
-				if(j == 1)
-				{
-					myNAV[i] = myNAV[i] - 0.0002*index[i]
-					commmision = commmision + 0.0002*index[i]
-				}
-				else{
-					myNAV[i] = myNAV[i] - 0.0002*2*index[i]
-					commmision = commmision + 0.0004*index[i]
-				}
-
-				j = j + 1
-				flag = 1
-			}
+			flag = signal[i]
 		}
 	}
 
 	record = cbind(record,action)
 	myNAV = myNAV/myNAV[1]
 	plotNAV = data.frame(date,myNAV,index,signal)
-	plotNAV
-
+	mylist = list(plotNAV,record,commmision)
+	mylist
 }
 
 
@@ -109,39 +80,63 @@ assess = function(ts){
 	outcome = vector()
 	r1 = (ts[n,2] - ts[1,2])/ts[1,2]
 	r2 = (ts[n,3] - ts[1,3])/ts[1,3]
+
+	# average daily return:
+	r = (ts[-1,2] - ts[-n,2]) / ts[-n,2]
+	r = mean(r)
+
+	# average anunally return:
+	r = (1+r)^n - 1
 	library(tseries)
 	maxDrawDown = maxdrawdown(ts[,2])
-	sdev = sd(ts[,2])
-	outcome = c(ts[1,1],r1,r2,maxDrawDown[[1]],sdev)
+	sdev = sd(ts[,2]) 
+	sharpe = r/sdev
+	outcome = c(ts[1,1],r1,r2,maxDrawDown[[1]],sdev,sharpe)
 	outcome
 }
 
 
-evaluate1 = function(plotNAV){
-	attach(plotNAV)
+evaluate1 = function(mylist){
+	plotNAV = mylist[[1]]
+	record = mylist[[2]]
+	myNAV = plotNAV$myNAV
+	
 	# 评价指标一
 	library(tseries)
 	maxDrawDown = maxdrawdown(myNAV)
-	timePeriod = c(as.Date(date[1]),as.Date(date[n]))
-	
-	totalTime = n
+	totalTime = length(plotNAV[,1])
 	tradeTime = length(record[,1])
+	n = totalTime
+	timePeriod = c(as.Date(date[1]),as.Date(date[n]))
 	totalReturn = paste((myNAV[n] - 1)*100, "%", sep='')
 	vol = sd(myNAV)
 
-	separatePerfomance = plotNAV[signal != 0,2] 
-	separatePerfomance = (separatePerfomance[-1] - separatePerfomance[-length(separatePerfomance)]) / separatePerfomance[-length(separatePerfomance)]
-	winningRate = length(which(separatePerfomance > 0)) / length(separatePerfomance)
-	winToLose = length(which(separatePerfomance > 0)) / (length(separatePerfomance) - length(which(separatePerfomance > 0)) )
+	# daily average return
+	r = (plotNAV[-1,2] - plotNAV[-n,2]) / plotNAV[-n,2]
+	r = mean(r)
+
+	# average anunally return:
+	r = (1+r)^n - 1
+	sharpe = r/vol
+	
+	separatePerfomance = plotNAV[signal != 0,2:3] 
+	nSep = length(separatePerfomance[,1])
+	rseparatePerfomance = (separatePerfomance[-1,] - separatePerfomance[-nSep,]) / separatePerfomance[-nSep,]
+	rseparatePerfomance = rbind(rseparatePerfomance,(plotNAV[n,2:3] - separatePerfomance[nSep,])/separatePerfomance[nSep,])
+	record = cbind(record,rseparatePerfomance)
+	colnames(record) = c('date','action','return')
+	winningRate = length(which(rseparatePerfomance[,1] > 0)) / length(rseparatePerfomance[,1])
+	winToLose = length(which(rseparatePerfomance[,1] > 0)) / (length(rseparatePerfomance[,1]) - length(which(rseparatePerfomance[,1] > 0)) )
 	drawDownPeriod = c(date[maxDrawDown[[2]]],date[maxDrawDown[[3]]])
-	mylist = list("日期区间" = timePeriod, "总交易日" = n, "交易次数" = tradeTime, 
-					"胜率" = winningRate, "盈亏比" = winToLose , "总收益率" = totalReturn, "交易费用" = commmision, "最大回撤" = maxDrawDown[[1]])
+	mylist = list("日期区间" = timePeriod, "总交易日" = n, "交易次数" = tradeTime, "胜率" = winningRate,
+					 "盈亏比" = winToLose , "总收益率" = totalReturn, "夏普比率" = sharpe, "交易费用" = mylist[[3]], "最大回撤" = maxDrawDown[[1]],"单次情况" = record)
 	mylist
 }
 
 
-evaluate2 = function(plotNAV){
+evaluate2 = function(mylist){
 	# 评价指标二
+	plotNAV = mylist[[1]]
 	plotNAV$date = as.POSIXlt(plotNAV$date)$year+1900
 
 	temp = plotNAV[plotNAV$date == 2007,]
@@ -155,9 +150,23 @@ evaluate2 = function(plotNAV){
 	}
 
 	outcome = as.data.frame(outcome)
-	colnames(outcome) = c("年份", "策略收益", "指数收益", "最大回撤", "波动率")
+	colnames(outcome) = c("年份", "策略收益", "指数收益", "最大回撤", "波动率","夏普比率")
 	total = assess(plotNAV)
 	total[1]='Total'
 	outcome = rbind(outcome , total)
 	outcome
+}
+
+
+xixi = function(ts)
+{
+	# 时间，走势
+	n = length(ts[,1])
+	temp1 = vector()
+	for(i in 1:(n-1))
+	{
+		temp1[i] = max(ts[i,2] - ts[(i+1):n,2])
+	}
+
+	max(temp1)
 }
