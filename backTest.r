@@ -18,9 +18,11 @@ backTest = function(signal, ts){
 	record = vector()
 	action = vector()
 	myNAV = vector()
+	fan = vector()
 	commmision = 0
 	j = 1
 	flag = 33
+	weight = 1
 
 	for(i in 1:n)
 	{
@@ -34,7 +36,7 @@ backTest = function(signal, ts){
 		else
 		{
 			profit = index[i] - index[i-1]
-			myNAV[i] = myNAV[i-1] + profit*flag
+			myNAV[i] = myNAV[i-1] + profit*flag*weight
 		}
 		
 
@@ -45,8 +47,8 @@ backTest = function(signal, ts){
 			# 在收盘时按收盘价卖空
 			action[j] = ifelse(signal[i] == -1, choose[2],choose[1])
 			record[j] = as.character(date[i])
-			
-
+			weight = myNAV[i]/index[i]
+			fan[j] = index[i]
 			# 第一笔交易应该为单边
 			if(j == 1)
 			{
@@ -59,14 +61,15 @@ backTest = function(signal, ts){
 			}
 
 			j = j + 1
+			if(flag == 33) {first = c(i,index[i])}
 			flag = signal[i]
 		}
 	}
 
-	record = cbind(record,action)
+	record = cbind(record,action,fan)
 	myNAV = myNAV/myNAV[1]
 	plotNAV = data.frame(date,myNAV,index,signal)
-	mylist = list(plotNAV,record,commmision)
+	mylist = list(plotNAV[first[1]:n,],record,commmision)
 	mylist
 }
 
@@ -119,17 +122,18 @@ evaluate1 = function(mylist){
 	r = (1+r)^n - 1
 	sharpe = r/vol
 	
-	separatePerfomance = plotNAV[signal != 0,2:3] 
+	separatePerfomance = plotNAV[plotNAV$signal != 0,2:3] 
 	nSep = length(separatePerfomance[,1])
 	rseparatePerfomance = (separatePerfomance[-1,] - separatePerfomance[-nSep,]) / separatePerfomance[-nSep,]
 	rseparatePerfomance = rbind(rseparatePerfomance,(plotNAV[n,2:3] - separatePerfomance[nSep,])/separatePerfomance[nSep,])
 	record = cbind(record,rseparatePerfomance)
-	colnames(record) = c('date','action','return')
+	colnames(record) = c('date','action','index','return','index_return')
 	winningRate = length(which(rseparatePerfomance[,1] > 0)) / length(rseparatePerfomance[,1])
 	winToLose = length(which(rseparatePerfomance[,1] > 0)) / (length(rseparatePerfomance[,1]) - length(which(rseparatePerfomance[,1] > 0)) )
 	drawDownPeriod = c(date[maxDrawDown[[2]]],date[maxDrawDown[[3]]])
 	mylist = list("日期区间" = timePeriod, "总交易日" = n, "交易次数" = tradeTime, "胜率" = winningRate,
-					 "盈亏比" = winToLose , "总收益率" = totalReturn, "夏普比率" = sharpe, "交易费用" = mylist[[3]], "最大回撤" = maxDrawDown[[1]],"单次情况" = record)
+					 "盈亏比" = winToLose , "总收益率" = totalReturn, "夏普比率" = sharpe, "交易费用" = mylist[[3]], "最大回撤" = maxDrawDown[[1]],"单次" = record)
+	write.csv(record,"fu1.csv")
 	mylist
 }
 
@@ -154,6 +158,7 @@ evaluate2 = function(mylist){
 	total = assess(plotNAV)
 	total[1]='Total'
 	outcome = rbind(outcome , total)
+	write.csv(outcome,"fu2.csv")
 	outcome
 }
 
